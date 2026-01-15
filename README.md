@@ -28,9 +28,14 @@ npm run build
 
 This project is configured to deploy to GitHub Pages automatically via GitHub Actions.
 
-1. The repository must have GitHub Pages enabled in Settings > Pages
-2. Select "GitHub Actions" as the source
-3. The workflow will automatically build and deploy on pushes to `main` branch
+### Initial Setup (First Time Only):
+
+1. Go to your repository: https://github.com/tanarui/ShogunLegendsV3
+2. Navigate to **Settings** → **Pages**
+3. Under **Source**, select **"GitHub Actions"** (not "Deploy from a branch")
+4. The workflow will automatically enable Pages and deploy on pushes to `main` branch
+
+**Note**: The workflow includes `enablement: true` to automatically enable Pages, but you may still need to manually set the source to "GitHub Actions" in the repository settings the first time.
 
 The app will be available at: `https://tanarui.github.io/ShogunLegendsV3/`
 
