@@ -74,6 +74,7 @@ export const saveProfile = (profile) => {
 };
 
 // Load profile from localStorage (with lazy initialization)
+// Returns null if profile doesn't exist, is invalid, or incompatible with current version
 export const loadProfile = () => {
   try {
     const storage = getStorage();
@@ -84,14 +85,74 @@ export const loadProfile = () => {
     const saved = storage.getItem('shogun_profile');
     if (!saved) return null;
     
-    const profile = JSON.parse(saved);
-    // Validate profile structure
-    if (profile.mbti && profile.factorScores && profile.hashcode) {
-      return profile;
+    let profile;
+    try {
+      profile = JSON.parse(saved);
+    } catch (parseError) {
+      console.error('Failed to parse saved profile (corrupted data):', parseError);
+      // Clear corrupted data
+      try {
+        storage.removeItem('shogun_profile');
+      } catch (clearError) {
+        console.error('Failed to clear corrupted profile:', clearError);
+      }
+      return null;
     }
-    return null;
+    
+    // Validate profile structure - check for required fields
+    if (!profile || typeof profile !== 'object') {
+      console.warn('Invalid profile structure: not an object');
+      return null;
+    }
+    
+    // Check for required fields
+    if (!profile.mbti || !profile.factorScores || !profile.hashcode) {
+      console.warn('Invalid profile structure: missing required fields', {
+        hasMBTI: !!profile.mbti,
+        hasFactorScores: !!profile.factorScores,
+        hasHashcode: !!profile.hashcode
+      });
+      return null;
+    }
+    
+    // Validate MBTI format (should be 4 characters)
+    if (typeof profile.mbti !== 'string' || profile.mbti.length !== 4) {
+      console.warn('Invalid MBTI format in saved profile:', profile.mbti);
+      return null;
+    }
+    
+    // Validate factorScores is an object with numeric values
+    if (typeof profile.factorScores !== 'object' || profile.factorScores === null) {
+      console.warn('Invalid factorScores in saved profile');
+      return null;
+    }
+    
+    // Check if placedUnits exist and validate structure
+    if (profile.placedUnits && !Array.isArray(profile.placedUnits)) {
+      console.warn('Invalid placedUnits in saved profile: not an array');
+      // Don't fail completely, just remove invalid placedUnits
+      profile.placedUnits = [];
+    }
+    
+    // Check if recruitGrid exists and validate structure
+    if (profile.recruitGrid && !Array.isArray(profile.recruitGrid)) {
+      console.warn('Invalid recruitGrid in saved profile: not an array');
+      // Don't fail completely, just remove invalid recruitGrid
+      profile.recruitGrid = null;
+    }
+    
+    return profile;
   } catch (error) {
-    console.error('Failed to load profile:', error);
+    console.error('Failed to load profile (unexpected error):', error);
+    // Try to clear potentially corrupted data
+    try {
+      const storage = getStorage();
+      if (storage) {
+        storage.removeItem('shogun_profile');
+      }
+    } catch (clearError) {
+      console.error('Failed to clear profile after error:', clearError);
+    }
     return null;
   }
 };

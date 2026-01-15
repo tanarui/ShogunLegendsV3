@@ -16,6 +16,7 @@ import { saveProfile, loadProfile, clearProfile, hasProfile, getProfileHashcode,
 import { shuffleArray, getRoleColor, getWaBonus, getFactorScoresFromMBTI } from './utils/gameUtils.js';
 import { createUnit, getEffectiveStats } from './utils/unitUtils.js';
 import { CHARACTERS, SHAPES, MBTI_TYPES, GRID_SIZE } from './data/gameData.js';
+import { t, getTranslations, getQuizQuestion, getHeroName, getHeroTitle, getSkillName, getSkillDesc } from './modules/translations.js';
 
 // --- TETRIS GRID LOGIC ---
 
@@ -80,31 +81,49 @@ const ShapePreview = ({ shapeName, role, rotation = 0, isInteractive = false, on
 };
 
 export default function ShogunLegendsV3() {
-  // Check for saved profile on mount
-  const savedProfile = loadProfile();
-  const initialPhase = 'intro'; // Always start with intro/title screen
+  // Always start with intro/title screen - don't auto-load saved profile on refresh
+  const initialPhase = 'intro';
+  
+  // Language state - load from localStorage or default to English
+  const [language, setLanguage] = useState(() => {
+    try {
+      const saved = localStorage.getItem('shogun_language');
+      return saved === 'ja' ? 'ja' : 'en';
+    } catch {
+      return 'en';
+    }
+  });
+  
+  // Save language preference
+  useEffect(() => {
+    try {
+      localStorage.setItem('shogun_language', language);
+    } catch (e) {
+      console.warn('Failed to save language preference:', e);
+    }
+  }, [language]);
   
   const [phase, setPhase] = useState(initialPhase);
-  const [userMBTI, setUserMBTI] = useState(savedProfile?.mbti || null);
-  const [profileHashcode, setProfileHashcode] = useState(savedProfile?.hashcode || null);
+  const [userMBTI, setUserMBTI] = useState(null);
+  const [profileHashcode, setProfileHashcode] = useState(null);
   
   // Quiz State
-  const [quizAnswers, setQuizAnswers] = useState(savedProfile?.quizAnswers || {});
+  const [quizAnswers, setQuizAnswers] = useState({});
   const [quizIndex, setQuizIndex] = useState(0);
   const [quizQuestions, setQuizQuestions] = useState([]);
-  const [factorScores, setFactorScores] = useState(savedProfile?.factorScores || {});
-  const [factorReturns, setFactorReturns] = useState(savedProfile?.factorReturns || null);
+  const [factorScores, setFactorScores] = useState({});
+  const [factorReturns, setFactorReturns] = useState(null);
 
   // Recruitment State
   const [recruitGrid, setRecruitGrid] = useState(
-    savedProfile?.recruitGrid || Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null))
+    Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null))
   );
-  const [placedUnits, setPlacedUnits] = useState(savedProfile?.placedUnits || []);
+  const [placedUnits, setPlacedUnits] = useState([]);
   const [availablePool, setAvailablePool] = useState([]);
   const [selectedRecruit, setSelectedRecruit] = useState(null);
   const [rotation, setRotation] = useState(0);
   const [hoverCell, setHoverCell] = useState(null);
-  const [showRecruitExplanation, setShowRecruitExplanation] = useState(!savedProfile); // Minimized if profile loaded
+  const [showRecruitExplanation, setShowRecruitExplanation] = useState(true);
   const [showOmyoReveal, setShowOmyoReveal] = useState(false);
 
   // Battle State
@@ -162,34 +181,55 @@ export default function ShogunLegendsV3() {
     const hashcode = saveProfile(profile);
     if (hashcode) {
       setProfileHashcode(hashcode);
-      alert(`Profile saved! Hashcode: ${hashcode}`);
+      alert(`${t('profileSaved', language)} ${hashcode}`);
     }
   };
 
-  // Load profile function
+  // Load profile function with error handling
   const handleLoadProfile = () => {
-    const profile = loadProfile();
-    if (profile) {
-      setUserMBTI(profile.mbti);
-      setFactorScores(profile.factorScores || {});
-      // Don't load factor returns - they should be generated fresh on deployment
-      setFactorReturns(null);
-      setQuizAnswers(profile.quizAnswers || {});
+    try {
+      const profile = loadProfile();
+      if (!profile) {
+        alert(t('noSavedProfile', language));
+        return;
+      }
       
-      // Validate and fix placed units - recalculate points if shapes have changed
-      let fixedPlacedUnits = [];
-      let fixedRecruitGrid = profile.recruitGrid || Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
-      
-      if (profile.placedUnits && profile.placedUnits.length > 0) {
-        // Rebuild grid from scratch to ensure consistency
-        fixedRecruitGrid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+      try {
+        setUserMBTI(profile.mbti);
+        setFactorScores(profile.factorScores || {});
+        // Don't load factor returns - they should be generated fresh on deployment
+        setFactorReturns(null);
+        setQuizAnswers(profile.quizAnswers || {});
         
-        profile.placedUnits.forEach(savedUnit => {
-          const currentChar = CHARACTERS[savedUnit.mbti];
-          if (currentChar) {
-            // Get current shape points (handles shape changes like Akechi)
-            const currentShape = SHAPES[currentChar.shape];
-            if (currentShape) {
+        // Validate and fix placed units - recalculate points if shapes have changed
+        let fixedPlacedUnits = [];
+        let fixedRecruitGrid = profile.recruitGrid || Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+        
+        if (profile.placedUnits && profile.placedUnits.length > 0) {
+          // Rebuild grid from scratch to ensure consistency
+          fixedRecruitGrid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+          
+          profile.placedUnits.forEach(savedUnit => {
+            try {
+              // Validate savedUnit structure
+              if (!savedUnit || !savedUnit.mbti) {
+                console.warn('Invalid saved unit structure:', savedUnit);
+                return;
+              }
+              
+              const currentChar = CHARACTERS[savedUnit.mbti];
+              if (!currentChar) {
+                console.warn(`Character ${savedUnit.mbti} no longer exists in current version`);
+                return;
+              }
+              
+              // Get current shape points (handles shape changes like Akechi)
+              const currentShape = SHAPES[currentChar.shape];
+              if (!currentShape) {
+                console.warn(`Shape ${currentChar.shape} not found for ${currentChar.name}`);
+                return;
+              }
+              
               // Recalculate points based on current shape using the helper function
               const rotation = savedUnit.rotation || 0;
               const points = getRotatedPoints(currentChar, rotation);
@@ -215,28 +255,39 @@ export default function ShogunLegendsV3() {
                 // Placement invalid with new shape - skip this unit
                 console.warn(`Cannot place ${currentChar.name} at saved position with new shape ${currentChar.shape}`);
               }
+            } catch (unitError) {
+              console.error(`Error processing saved unit ${savedUnit?.mbti}:`, unitError);
+              // Continue with other units
             }
-          }
-        });
+          });
+        }
+        
+        setPlacedUnits(fixedPlacedUnits);
+        setRecruitGrid(fixedRecruitGrid);
+        setProfileHashcode(profile.hashcode);
+        
+        if (fixedPlacedUnits.length >= 5) {
+          setPhase('recruit'); // Go to recruit if team is already set
+        } else if (profile.mbti) {
+          setPhase('quiz_result'); // Go to result if quiz is done
+        } else {
+          setPhase('quiz');
+        }
+      } catch (loadError) {
+        console.error('Error loading profile data:', loadError);
+        alert(t('errorLoadingProfile', language));
+        // Clear potentially corrupted profile
+        clearProfile();
       }
-      
-      setPlacedUnits(fixedPlacedUnits);
-      setRecruitGrid(fixedRecruitGrid);
-      setProfileHashcode(profile.hashcode);
-      
-      if (fixedPlacedUnits.length >= 5) {
-        setPhase('recruit'); // Go to recruit if team is already set
-      } else if (profile.mbti) {
-        setPhase('quiz_result'); // Go to result if quiz is done
-      } else {
-        setPhase('quiz');
-      }
+    } catch (error) {
+      console.error('Unexpected error in handleLoadProfile:', error);
+      alert(t('failedToLoadProfile', language));
     }
   };
 
   // Clear profile function
   const handleClearProfile = () => {
-    if (confirm('Clear saved profile? This cannot be undone.')) {
+    if (confirm(t('clearProfileConfirm', language))) {
       clearProfile();
       setProfileHashcode(null);
       setPhase('quiz');
@@ -591,7 +642,7 @@ export default function ShogunLegendsV3() {
     setTurnQueue(initialQueue);
     setCurrentActorId(initialQueue[0]);
     setBattleStats({ turns: 0, startTime: Date.now() });
-    setBattleLog(isHellMode ? ["REMATCH: HELL MODE!"] : (isChallengeMode ? ["REMATCH: CHALLENGE MODE!"] : ["REMATCH STARTED!"]));
+    setBattleLog(isHellMode ? [t('rematchHellMode', language)] : (isChallengeMode ? [t('rematchChallengeMode', language)] : [t('rematchStarted', language)]));
     setShowOmyoImpact(true);
     setShowStartOverlay(false);
     setIsPlayerDemoralized(false);
@@ -667,7 +718,7 @@ export default function ShogunLegendsV3() {
     setCurrentActorId(initialQueue[0]);
 
     setBattleStats({ turns: 0, startTime: Date.now() });
-    setBattleLog(["CHALLENGE MODE START!", "Defeat the Demon Lord!"]);
+    setBattleLog([t('challengeModeStart', language), t('defeatDemonLord', language)]);
     setShowOmyoImpact(true);
     setShowStartOverlay(false);
     setIsChallengeMode(true);
@@ -724,7 +775,7 @@ export default function ShogunLegendsV3() {
     setCurrentActorId(initialQueue[0]);
 
     setBattleStats({ turns: 0, startTime: Date.now() });
-    setBattleLog(["🔥 HELL MODE ACTIVATED! 🔥", "Defeat Donald Trump and his Droids!"]);
+    setBattleLog([t('hellModeActivated', language), t('defeatTrump', language)]);
     setShowOmyoImpact(false);
     setShowStartOverlay(false);
     setIsHellMode(true);
@@ -798,7 +849,7 @@ export default function ShogunLegendsV3() {
 
     if (actor.status === 'stun') {
         setProcessing(true);
-        setBattleLog(p => [...p, `${actor.name} is Stunned!`]);
+        setBattleLog(p => [...p, `${actor.mbti ? getHeroName(actor.mbti, language) : actor.name} ${t('isStunned', language)}`]);
         setTimeout(() => {
             setUnits(prev => prev.map(u => u.id === actor.id ? { ...u, status: null } : u));
             nextTurn();
@@ -917,7 +968,7 @@ export default function ShogunLegendsV3() {
         if (aliveDroids.length > 0) {
             // Randomly select a Droid to take the hit
             const guardingDroid = aliveDroids[Math.floor(Math.random() * aliveDroids.length)];
-            setBattleLog(prev => [...prev, `🛡️ ${guardingDroid.name} intercepts the attack on Trump!`]);
+            setBattleLog(prev => [...prev, `🛡️ ${guardingDroid.mbti ? getHeroName(guardingDroid.mbti, language) : guardingDroid.name} ${t('interceptsAttack', language)}`]);
             // Apply damage to the Droid instead
             const droidDmg = Math.floor(rawDmg * 0.8); // Droids take 80% of the damage
             const freshDroid = currentUnits.find(u => u.id === guardingDroid.id);
@@ -929,7 +980,7 @@ export default function ShogunLegendsV3() {
             ));
             setTimeout(() => setUnits(prev => prev.map(u => u.id === guardingDroid.id ? { ...u, anim: null } : u)), 500);
             if (newDroidHp <= 0) {
-                setBattleLog(prev => [...prev, `${guardingDroid.name} is destroyed!`]);
+                setBattleLog(prev => [...prev, `${guardingDroid.mbti ? getHeroName(guardingDroid.mbti, language) : guardingDroid.name} ${t('isDestroyed', language)}`]);
             }
             return { dmg: droidDmg, killed: newDroidHp <= 0 };
         }
@@ -993,7 +1044,7 @@ export default function ShogunLegendsV3() {
     });
 
     if (isLeaderDeath) {
-        setBattleLog(p => [...p, `💔 LEADER FALLEN! ${freshTarget.name}'s army demoralized!`]);
+        setBattleLog(p => [...p, `${t('leaderFallen', language)} ${freshTarget.mbti ? getHeroName(freshTarget.mbti, language) : freshTarget.name}${t('armyDemoralized', language)}`]);
         if (freshTarget.isPlayer) setIsPlayerDemoralized(true);
     }
 
@@ -1010,7 +1061,7 @@ export default function ShogunLegendsV3() {
     const dmg = (effStats.atk * (0.9 + Math.random() * 0.2)) - (targetEff.def * 0.4);
 
     const res = applyDamage(actor, target, dmg);
-    setBattleLog(p => [...p, `${actor.name} attacks ${target.name} for ${res.dmg}!`]);
+    setBattleLog(p => [...p, `${actor.mbti ? getHeroName(actor.mbti, language) : actor.name} ${t('attacksFor', language)} ${target.mbti ? getHeroName(target.mbti, language) : target.name} ${t('attacksForDmg', language)} ${res.dmg}${t('damage', language)}`]);
 
     // Counter
     if (!res.killed && target.role === 'Warlord') {
@@ -1021,7 +1072,7 @@ export default function ShogunLegendsV3() {
                 const tStats = getEffectiveStats(freshTarget);
                 const aStats = getEffectiveStats(freshActor);
                 const counterDmg = Math.max(1, Math.floor((tStats.atk * 0.7) - (aStats.def * 0.4)));
-                setBattleLog(p => [...p, `⚔️ ${freshTarget.name} COUNTERS!`]);
+                setBattleLog(p => [...p, `${t('counters', language)} ${freshTarget.mbti ? getHeroName(freshTarget.mbti, language) : freshTarget.name} ${t('countersExclamation', language)}`]);
                 triggerAnim(freshTarget.id, 'slash');
                 applyDamage(freshTarget, freshActor, counterDmg);
                 setTurnToken(prev => prev + 1);
@@ -1038,7 +1089,7 @@ export default function ShogunLegendsV3() {
     }
 
     if (res.killed && !actor.hasHyped && enemiesAlive > 0) {
-        setBattleLog(p => [...p, `🔥 HYPE! ${actor.name} attacks again!`]);
+        setBattleLog(p => [...p, `${t('hypeAttacksAgain', language)} ${actor.mbti ? getHeroName(actor.mbti, language) : actor.name} ${t('attacksAgain', language)}`]);
         setUnits(prev => prev.map(u => u.id === actor.id ? { ...u, hasHyped: true } : u));
         setTimeout(() => nextTurn(actor.id), 1200);
     } else {
@@ -1053,7 +1104,9 @@ export default function ShogunLegendsV3() {
   };
 
   const executeSkillEffect = (actor, skillName, target) => {
-    let log = `${actor.name}: ${skillName}!`;
+    const actorName = actor.mbti ? getHeroName(actor.mbti, language) : actor.name;
+    const translatedSkillName = actor.mbti ? getSkillName(actor.mbti, language) : skillName;
+    let log = `${actorName}: ${translatedSkillName}!`;
     let killed = false;
     const effStats = getEffectiveStats(actor);
     const targetEff = target ? getEffectiveStats(target) : {};
@@ -1065,7 +1118,7 @@ export default function ShogunLegendsV3() {
         if (skillName === "Assassinate") mult = 2.2;
         const targetDef = (skillName === "Assassinate" || skillName === "Bishamonten") ? 0 : targetEff.def;
         const res = applyDamage(actor, target, (effStats.atk * mult) - (targetDef * 0.3));
-        log += ` Hit for ${res.dmg}!`;
+        log += ` ${t('hitFor', language)} ${res.dmg}${t('damage', language)}`;
         killed = res.killed;
     }
     else if (skillName === "Two Heavens") {
@@ -1073,7 +1126,7 @@ export default function ShogunLegendsV3() {
         setUnits(prev => prev.map(u => u.id === target.id ? { ...u, anim: 'slash' } : u));
         const hit1 = applyDamage(actor, target, (effStats.atk * 0.7) - (targetEff.def * 0.3));
         const hit2 = applyDamage(actor, target, (effStats.atk * 0.7) - (targetEff.def * 0.3));
-        log += ` Double Slash!`;
+        log += ` ${t('doubleSlash', language)}`;
         killed = hit1.killed || hit2.killed;
     }
     else if (skillName === "Honno-ji Fire") {
@@ -1083,7 +1136,7 @@ export default function ShogunLegendsV3() {
             const res = applyDamage(actor, e, 25);
             if(res.killed) { killed = true; killCount++; }
         });
-        log += " Burns all enemies!";
+        log += ` ${t('burnsAllEnemies', language)}`;
         if (killCount === enemies.length) { setPhase(actor.isPlayer ? 'victory' : 'defeat'); return; }
     }
     else if (skillName === "Make America Great Again") {
@@ -1101,7 +1154,7 @@ export default function ShogunLegendsV3() {
             }
             return u;
         }));
-        log += " 40 DMG to all enemies, Trump heals 30 HP!";
+        log += ` ${t('dmgToAllEnemies', language)}`;
         if (killCount === playerUnits.length) { setPhase('defeat'); return; }
     }
     else if (["Sunomata", "Furinkazan", "Dragon Roar", "Great Peace", "Matsuri Beat"].includes(skillName)) {
@@ -1152,7 +1205,7 @@ export default function ShogunLegendsV3() {
                  });
              }, 100);
         }
-        log += ` Army ${stat.toUpperCase()} Up!`;
+        log += ` ${t('armyUp', language)} ${stat.toUpperCase()} ${t('up', language)}`;
     }
     else if (["Supply Lines", "Mother's Love", "Kamakura Law"].includes(skillName)) {
         const isTeam = skillName !== "Kamakura Law";
@@ -1162,7 +1215,7 @@ export default function ShogunLegendsV3() {
             }
             return u;
         }));
-        log += " Vitality restored!";
+        log += ` ${t('vitalityRestored', language)}`;
     }
     else if (skillName === "Wabi-Sabi") {
         setUnits(prev => prev.map(u => {
@@ -1176,12 +1229,13 @@ export default function ShogunLegendsV3() {
             }
             return u;
         }));
-        log += " Tea calms the soul (HP/MP Up)!";
+        log += ` ${t('teaCalms', language)}`;
     }
     else if (skillName === "Eight Gates") {
         if(target) {
             setUnits(prev => prev.map(u => u.id === target.id ? { ...u, status: 'stun', anim: 'shake' } : u));
-            log += ` Stunned ${target.name}!`;
+            const targetName = target.mbti ? getHeroName(target.mbti, language) : target.name;
+            log += ` ${t('stunned', language)} ${targetName}${language === 'ja' ? '！' : '!'}`;
         }
     }
 
@@ -1273,7 +1327,9 @@ export default function ShogunLegendsV3() {
         </div>
 
         <div className="text-center w-full overflow-hidden">
-            <div className="text-[9px] md:text-[10px] font-bold truncate leading-tight text-white">{unit.name}</div>
+            <div className="text-[9px] md:text-[10px] font-bold truncate leading-tight text-white">
+              {unit.mbti ? (unit.name.startsWith('Elite ') ? `Elite ${getHeroName(unit.mbti, language)}` : unit.name.startsWith('👹 ') ? `👹 ${getHeroName(unit.mbti, language)}` : getHeroName(unit.mbti, language)) : unit.name}
+            </div>
             {unit.isGuarding && <Shield size={12} className="text-blue-400 inline"/>}
             {protectedByGuard && <div className="text-[8px] text-blue-300">🛡️ Guarded</div>}
             {unit.status === 'stun' && <div className="text-[8px] bg-yellow-500 text-black px-1 rounded inline-block">STUN</div>}
@@ -1349,7 +1405,7 @@ export default function ShogunLegendsV3() {
               >
                 <div className="flex items-center gap-2">
                   <Info size={16} className="text-blue-400" />
-                  <span className="font-bold text-sm">Formation Guide</span>
+                  <span className="font-bold text-sm">{t('formationGuide', language)}</span>
                 </div>
                 <ChevronRight 
                   size={16} 
@@ -1359,30 +1415,30 @@ export default function ShogunLegendsV3() {
               {showRecruitExplanation && (
                 <div className="px-4 pb-4 space-y-3 text-sm">
                   <div>
-                    <div className="font-bold text-yellow-400 mb-1">Ranks:</div>
+                    <div className="font-bold text-yellow-400 mb-1">{t('ranks', language)}</div>
                     <div className="text-gray-300 space-y-1">
-                      <div><span className="text-red-400">S-Rank</span>: Highest stats, strongest abilities</div>
-                      <div><span className="text-blue-400">A-Rank</span>: Strong stats, good abilities</div>
-                      <div><span className="text-purple-400">B-Rank</span>: Balanced stats, supportive abilities</div>
+                      <div><span className="text-red-400">{t('sRank', language)}</span>: {t('sRankDesc', language)}</div>
+                      <div><span className="text-blue-400">{t('aRank', language)}</span>: {t('aRankDesc', language)}</div>
+                      <div><span className="text-purple-400">{t('bRank', language)}</span>: {t('bRankDesc', language)}</div>
                     </div>
                   </div>
                   <div>
-                    <div className="font-bold text-yellow-400 mb-1">Placement Strategy:</div>
+                    <div className="font-bold text-yellow-400 mb-1">{t('placementStrategy', language)}</div>
                     <div className="text-gray-300 space-y-1">
-                      <div>• <span className="text-blue-400">Guardians</span> should be placed in <span className="text-yellow-400">center columns (columns 1-3)</span> to protect adjacent heroes</div>
-                      <div>• When a Guardian is <span className="text-blue-400">Guarding</span>, adjacent heroes take <span className="text-green-400">40% less damage</span></div>
-                      <div>• <span className="text-red-400">Warlords</span> excel at dealing damage and counter-attacking</div>
-                      <div>• <span className="text-orange-400">Duelists</span> are fast attackers, weak against Guardians/Tacticians</div>
-                      <div>• <span className="text-purple-400">Tacticians</span> provide support, healing, and crowd control</div>
+                      <div>• <span className="text-blue-400">{t('guardians', language)}</span> {t('guardianPlacement', language)}</div>
+                      <div>• {t('guardianEffect', language)}</div>
+                      <div>• <span className="text-red-400">{t('warlords', language)}</span> {t('warlordDesc', language)}</div>
+                      <div>• <span className="text-orange-400">{t('duelists', language)}</span> {t('duelistDesc', language)}</div>
+                      <div>• <span className="text-purple-400">{t('tacticians', language)}</span> {t('tacticianDesc', language)}</div>
                     </div>
                   </div>
                   <div>
-                    <div className="font-bold text-yellow-400 mb-1">Formation Tips:</div>
+                    <div className="font-bold text-yellow-400 mb-1">{t('formationTips', language)}</div>
                     <div className="text-gray-300 space-y-1">
-                      <div>• Place your <span className="text-yellow-400">Leader</span> first (required)</div>
-                      <div>• Rotate shapes by clicking on them to fit better</div>
-                      <div>• Units with same MBTI type as leader get <span className="text-green-400">Perfect Wa</span> bonus (+15 HP, +3 ATK/DEF)</div>
-                      <div>• Fill all 5 slots before deploying to battle</div>
+                      <div>• {t('leaderFirst', language)}</div>
+                      <div>• {t('rotateShapes', language)}</div>
+                      <div>• {t('perfectWa', language)}</div>
+                      <div>• {t('fillAllSlots', language)}</div>
                     </div>
                   </div>
                 </div>
@@ -1392,14 +1448,14 @@ export default function ShogunLegendsV3() {
             <div className="bg-slate-900 border-b border-slate-800 shrink-0">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3">
                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
-                        <h2 className="font-bold text-yellow-500 text-sm sm:text-base">WAR COUNCIL</h2>
+                        <h2 className="font-bold text-yellow-500 text-sm sm:text-base">{t('warCouncil', language)}</h2>
                         <div className="text-xs text-gray-400 flex gap-3 sm:gap-4">
                             <span>UNITS: <b className="text-white">{placedUnits.length}/5</b></span>
                             <span>HP: <b className="text-white">{placedUnits.reduce((a,b)=>a+b.hp,0)}</b></span>
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-                        {!hasLeader && <div className="text-xs text-red-500 font-bold flex items-center animate-pulse"><AlertCircle size={14} className="mr-1"/> Place Leader First!</div>}
+                        {!hasLeader && <div className="text-xs text-red-500 font-bold flex items-center animate-pulse"><AlertCircle size={14} className="mr-1"/> {t('placeLeaderFirst', language)}</div>}
                         <button
                           onClick={handleSaveProfile}
                           className="px-3 sm:px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded font-bold text-xs sm:text-sm flex items-center gap-1 sm:gap-2"
@@ -1412,7 +1468,7 @@ export default function ShogunLegendsV3() {
                           onClick={handleDeploy}
                           className="px-4 sm:px-6 py-2 bg-red-600 disabled:bg-gray-800 disabled:text-gray-500 rounded font-bold text-xs sm:text-sm"
                         >
-                          DEPLOY
+                          {t('deploy', language)}
                         </button>
                         {placedUnits.length >= 5 && (() => {
                           const teamHashcode = encodeTeamHashcode({
@@ -1422,7 +1478,7 @@ export default function ShogunLegendsV3() {
                           });
                           return teamHashcode ? (
                             <div className="text-xs border-l border-slate-700 pl-3">
-                              <div className="text-slate-400 mb-1">Team Hashcode (for PvP):</div>
+                              <div className="text-slate-400 mb-1">{t('teamHashcode', language)}</div>
                               <div className="text-yellow-400 font-mono font-bold bg-slate-800 px-2 py-1 rounded select-all break-all">
                                 {teamHashcode}
                               </div>
@@ -1447,17 +1503,17 @@ export default function ShogunLegendsV3() {
                                         isInteractive={true}
                                         onRotate={() => setRotation((r) => (r + 1) % 4)}
                                     />
-                                    <div className="text-[10px] text-yellow-500 animate-pulse mb-1">Tap to Rotate</div>
+                                    <div className="text-[10px] text-yellow-500 animate-pulse mb-1">{t('tapToRotate', language)}</div>
 
                                     <div className="w-full bg-slate-800 p-2 rounded border border-slate-600 text-[10px] shadow-lg">
                                         <div className="font-bold text-white mb-1 flex items-center gap-1">
-                                            <Info size={10}/> TACTICAL ANALYSIS
+                                            <Info size={10}/> {t('tacticalAnalysis', language)}
                                         </div>
                                         <div className="mb-2 text-gray-300 italic leading-tight">
-                                            "{selectedRecruit.desc}"
+                                            "{selectedRecruit.mbti ? getSkillDesc(selectedRecruit.mbti, language) : selectedRecruit.desc}"
                                         </div>
                                         <div className="border-t border-gray-600 pt-1">
-                                            <div className="font-bold text-gray-400 mb-1">TEAM IMPACT</div>
+                                            <div className="font-bold text-gray-400 mb-1">{t('teamImpact', language)}</div>
                                             <div className="grid grid-cols-3 gap-1">
                                                 <div className="bg-black/40 p-1 rounded text-center">
                                                     <div className="text-gray-500">HP</div>
@@ -1579,8 +1635,8 @@ export default function ShogunLegendsV3() {
                                                 <ShapePreview shapeName={c.shape} role={c.role} />
                                             </div>
                                             <div className="min-w-0">
-                                                <div className="font-bold text-xs truncate leading-tight">{c.name}</div>
-                                                <div className="text-[9px] text-yellow-500 truncate">{c.skillName}</div>
+                                                <div className="font-bold text-xs truncate leading-tight">{getHeroName(c.mbti, language)}</div>
+                                                <div className="text-[9px] text-yellow-500 truncate">{getSkillName(c.mbti, language)}</div>
                                             </div>
                                         </div>
                                         <div className="grid grid-cols-3 gap-1 text-[9px] bg-black/20 p-1 rounded">
@@ -1610,7 +1666,7 @@ export default function ShogunLegendsV3() {
               </span>
             </div>
             <h3 className="text-xl sm:text-2xl font-semibold leading-snug mb-6 text-white">
-              {quizQuestions[quizIndex]?.text}
+              {getQuizQuestion(quizQuestions[quizIndex]?.id, language)}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
               {LIKERT.map(opt => (
@@ -1623,7 +1679,7 @@ export default function ShogunLegendsV3() {
                       : 'bg-slate-800 border-slate-700 hover:border-emerald-400 text-white'
                   }`}
                 >
-                  {opt.label}
+                  {t(opt.value === 1 ? 'stronglyDisagree' : opt.value === 2 ? 'disagree' : opt.value === 3 ? 'neutral' : opt.value === 4 ? 'agree' : 'stronglyAgree', language)}
                 </button>
               ))}
             </div>
@@ -1635,7 +1691,7 @@ export default function ShogunLegendsV3() {
                   quizIndex === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:border-slate-400'
                 } bg-slate-800 border-slate-700 text-white`}
               >
-                Back
+                {t('back', language)}
               </button>
             </div>
             <div className="mt-4">
@@ -1659,8 +1715,8 @@ export default function ShogunLegendsV3() {
             </h1>
             <div className="bg-slate-900 rounded-xl p-6 mb-4">
               <h2 className="text-2xl font-bold mb-2 text-white">MBTI Type: <span className="text-yellow-400">{userMBTI}</span></h2>
-              <h3 className="text-xl font-semibold mb-4 text-emerald-400">{CHARACTERS[userMBTI].name}</h3>
-              <p className="text-slate-300 mb-4">{CHARACTERS[userMBTI].desc}</p>
+              <h3 className="text-xl font-semibold mb-4 text-emerald-400">{getHeroName(userMBTI, language)}</h3>
+              <p className="text-slate-300 mb-4">{getSkillDesc(userMBTI, language)}</p>
             </div>
             
             <div className="bg-slate-900 rounded-xl p-6 mb-4">
@@ -1676,9 +1732,9 @@ export default function ShogunLegendsV3() {
             </div>
 
             <div className="bg-slate-900 rounded-xl p-6 mb-4">
-              <h3 className="text-xl font-bold mb-4 text-white">Factor Exposure Scores</h3>
+              <h3 className="text-xl font-bold mb-4 text-white">{t('factorExposureScores', language)}</h3>
               <p className="text-sm text-slate-400 mb-4 italic">
-                Your strategic exposure to each factor. The battlefield environment (Omyo) will reveal how these factors manifest when you deploy.
+                {t('factorExposureDescription', language)}
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                 {Object.entries(factorScores).map(([factor, score]) => (
@@ -1695,17 +1751,17 @@ export default function ShogunLegendsV3() {
                 onClick={startRecruit}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-full font-bold text-lg shadow-lg"
               >
-                Enter War Council
+                {t('enterWarCouncil', language)}
               </button>
               <button
                 onClick={handleSaveProfile}
                 className="bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg font-bold text-sm flex items-center gap-2"
               >
-                <Save size={16} /> Save Profile
+                <Save size={16} /> {t('saveProfile', language)}
               </button>
               {profileHashcode && (
                 <div className="text-xs text-slate-400 mt-2">
-                  Profile: #{profileHashcode}
+                  {t('profile', language)}: #{profileHashcode}
                 </div>
               )}
             </div>
@@ -1718,8 +1774,34 @@ export default function ShogunLegendsV3() {
         <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center max-w-2xl mx-auto w-full">
              {phase === 'intro' && (
                 <div className="text-center space-y-6">
-                    <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-yellow-500">SHOGUN LEGENDS V3</h1>
-                    <p className="text-slate-400 text-lg">Factor-Based Strategy Battle</p>
+                    {/* Language Toggle */}
+                    <div className="flex justify-end w-full max-w-md mx-auto mb-4">
+                      <div className="flex items-center gap-2 bg-slate-800 rounded-lg p-1">
+                        <button
+                          onClick={() => setLanguage('en')}
+                          className={`px-3 py-1 rounded text-sm font-bold transition-colors ${
+                            language === 'en' 
+                              ? 'bg-blue-600 text-white' 
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {t('english', language)}
+                        </button>
+                        <button
+                          onClick={() => setLanguage('ja')}
+                          className={`px-3 py-1 rounded text-sm font-bold transition-colors ${
+                            language === 'ja' 
+                              ? 'bg-blue-600 text-white' 
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {t('japanese', language)}
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-yellow-500">{t('title', language)}</h1>
+                    <p className="text-slate-400 text-lg">{t('subtitle', language)}</p>
                     
                     {hasProfile() && (() => {
                       const profile = loadProfile();
@@ -1728,7 +1810,7 @@ export default function ShogunLegendsV3() {
                       
                       return (
                         <div className="bg-slate-800 p-6 rounded-lg mb-4 max-w-md mx-auto">
-                          <div className="text-sm text-slate-300 mb-3">Saved Profile</div>
+                          <div className="text-sm text-slate-300 mb-3">{t('savedProfile', language)}</div>
                           <div className="text-lg font-mono text-yellow-400 mb-4">#{profile?.hashcode || 'N/A'}</div>
                           
                           <div className="text-left mb-4 space-y-2">
@@ -1739,7 +1821,7 @@ export default function ShogunLegendsV3() {
                                 <span className="text-gray-500">✗</span>
                               )}
                               <span className={hasPersonality ? "text-slate-200" : "text-slate-500"}>
-                                Personality Type: {hasPersonality ? CHARACTERS[profile.mbti]?.name || profile.mbti : "Not Set"}
+                                {t('personalityType', language)}: {hasPersonality ? CHARACTERS[profile.mbti]?.name || profile.mbti : t('notSet', language)}
                               </span>
                             </div>
                             <div className="flex items-center gap-2 text-sm">
@@ -1749,7 +1831,7 @@ export default function ShogunLegendsV3() {
                                 <span className="text-gray-500">✗</span>
                               )}
                               <span className={hasTeam ? "text-slate-200" : "text-slate-500"}>
-                                Team Formation: {hasTeam ? `${profile.placedUnits.length} units placed` : "Not Set"}
+                                {t('teamFormation', language)}: {hasTeam ? `${profile.placedUnits.length} ${t('unitsPlaced', language)}` : t('notSet', language)}
                               </span>
                             </div>
                           </div>
@@ -1759,16 +1841,16 @@ export default function ShogunLegendsV3() {
                               onClick={handleLoadProfile}
                               className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-bold"
                             >
-                              Load Profile {hasTeam ? "(Continue Game)" : "(Personality Only)"}
+                              {t('loadProfile', language)} {hasTeam ? `(${t('continueGame', language)})` : `(${t('personalityOnly', language)})`}
                             </button>
                             {hasTeam && (
                               <div className="space-y-2">
-                                <div className="text-xs text-slate-400 mb-1">PvP Mode - Enter Enemy Team Hashcode</div>
+                                <div className="text-xs text-slate-400 mb-1">{t('enterEnemyHashcode', language)}</div>
                                 <input
                                   type="text"
                                   value={pvpHashcode}
                                   onChange={(e) => setPvpHashcode(e.target.value)}
-                                  placeholder="Enter Hashcode (e.g. ENTJ01234)"
+                                  placeholder={t('enterHashcodePlaceholder', language)}
                                   className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-sm font-mono text-center"
                                   maxLength={9}
                                 />
@@ -1776,7 +1858,7 @@ export default function ShogunLegendsV3() {
                                   onClick={() => {
                                     const normalizedHashcode = pvpHashcode.trim();
                                     if (!normalizedHashcode || normalizedHashcode.length !== 9) {
-                                      alert('Please enter a valid 9-character team hashcode (e.g. ENTJ01234)');
+                                      alert(t('enterHashcodePlaceholder', language));
                                       return;
                                     }
                                     
@@ -1784,7 +1866,7 @@ export default function ShogunLegendsV3() {
                                     const enemyTeamData = loadTeamByHashcode(normalizedHashcode);
                                     console.log('Decoding hashcode:', normalizedHashcode, 'Result:', enemyTeamData);
                                     if (!enemyTeamData || !enemyTeamData.placedUnits || enemyTeamData.placedUnits.length < 5) {
-                                      alert(`Invalid team hashcode: "${normalizedHashcode}"\n\nPlease check:\n1. The hashcode is correct and complete\n2. It's a valid team hashcode (not a profile hashcode)\n3. All characters are entered correctly`);
+                                      alert(`${t('invalidHashcode', language)}: "${normalizedHashcode}"`);
                                       return;
                                     }
                                     
@@ -1826,7 +1908,7 @@ export default function ShogunLegendsV3() {
                                   }}
                                   className="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded text-sm font-bold"
                                 >
-                                  Start PvP Battle
+                                  {t('startPvPBattle', language)}
                                 </button>
                                 <div className="text-xs text-slate-500 text-center space-y-1">
                                   <div>Profile Hashcode: #{profile?.hashcode || 'N/A'}</div>
@@ -1857,14 +1939,14 @@ export default function ShogunLegendsV3() {
                     })()}
                     
                     <div className="flex flex-col gap-3 max-w-md mx-auto">
-                        <button onClick={() => setPhase('quiz')} className="bg-red-600 px-8 py-3 rounded-lg font-bold hover:bg-red-700 transition-colors">Start New Game</button>
-                        <button onClick={() => setPhase('select_mbti')} className="bg-purple-600 px-8 py-3 rounded-lg font-bold hover:bg-purple-700 transition-colors">I Know My Personality Type</button>
+                        <button onClick={() => setPhase('quiz')} className="bg-red-600 px-8 py-3 rounded-lg font-bold hover:bg-red-700 transition-colors">{t('newGame', language)}</button>
+                        <button onClick={() => setPhase('select_mbti')} className="bg-purple-600 px-8 py-3 rounded-lg font-bold hover:bg-purple-700 transition-colors">{t('iKnowMyType', language)}</button>
                     </div>
                 </div>
              )}
              {phase === 'select_mbti' && (
                 <div className="w-full space-y-4">
-                    <h2 className="text-2xl font-bold text-center mb-4">Select Your Personality Type</h2>
+                    <h2 className="text-2xl font-bold text-center mb-4">{t('personalityType', language)}</h2>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                         {MBTI_TYPES.map(t => {
                             const char = CHARACTERS[t];
@@ -1875,8 +1957,8 @@ export default function ShogunLegendsV3() {
                                     className="p-3 bg-slate-800 rounded-lg hover:bg-slate-700 border border-slate-700 hover:border-slate-500 transition-all text-left"
                                 >
                                     <div className="font-mono text-xs text-slate-400 mb-1">{t}</div>
-                                    <div className="font-bold text-sm text-white">{char.name}</div>
-                                    <div className="text-xs text-slate-300 mt-1">{char.title}</div>
+                                    <div className="font-bold text-sm text-white">{getHeroName(t, language)}</div>
+                                    <div className="text-xs text-slate-300 mt-1">{getHeroTitle(t, language)}</div>
                                 </button>
                             );
                         })}
@@ -1885,9 +1967,9 @@ export default function ShogunLegendsV3() {
              )}
              {phase === 'result' && userMBTI && (
                 <div className="text-center">
-                    <h2 className="text-4xl font-black mb-4">{CHARACTERS[userMBTI].name}</h2>
-                    <div className="bg-slate-900 p-4 rounded mb-6">{CHARACTERS[userMBTI].desc}</div>
-                    <button onClick={startRecruit} className="bg-white text-black px-8 py-3 rounded-full font-bold">Enter War Council</button>
+                    <h2 className="text-4xl font-black mb-4">{getHeroName(userMBTI, language)}</h2>
+                    <div className="bg-slate-900 p-4 rounded mb-6">{getSkillDesc(userMBTI, language)}</div>
+                    <button onClick={startRecruit} className="bg-white text-black px-8 py-3 rounded-full font-bold">{t('enterWarCouncil', language)}</button>
                 </div>
              )}
         </div>
@@ -1903,26 +1985,24 @@ export default function ShogunLegendsV3() {
             <div className="text-center mb-4 sm:mb-6">
               <div className="text-4xl sm:text-6xl mb-2">⚡</div>
               <h1 className="text-2xl sm:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-emerald-400 mb-2">
-                OMYO REVELATION
+                {t('omyoRevelation', language)}
               </h1>
-              <p className="text-slate-400 italic text-sm sm:text-base">陰陽の気が現れる</p>
+              <p className="text-slate-400 italic text-sm sm:text-base">{t('omyoSubtitle', language)}</p>
             </div>
 
             {/* Story Text */}
             <div className="bg-slate-800/50 rounded-xl p-6 mb-6 border border-slate-700">
               <p className="text-slate-300 leading-relaxed mb-4 text-lg">
-                As your forces deploy to the battlefield, the <span className="text-purple-400 font-bold">Omyo</span> — the natural balance of yin and yang — begins to manifest. 
-                The very elements respond to your strategic exposure, revealing how the forces of nature will favor or challenge your formation.
+                {t('omyoStory1', language)}
               </p>
               <p className="text-slate-300 leading-relaxed text-lg">
-                The winds shift, the earth trembles, and the spiritual energies align. Your heroes' connection to the fundamental forces of the world 
-                becomes clear as the <span className="text-emerald-400 font-bold">environmental elements</span> reveal their influence...
+                {t('omyoStory2', language)}
               </p>
             </div>
 
             {/* Factor Returns Display */}
             <div className="bg-gradient-to-br from-purple-900/30 to-emerald-900/30 rounded-xl p-6 mb-6 border border-purple-500/20">
-              <h2 className="text-2xl font-bold text-center mb-4 text-yellow-300">Environmental Forces Manifest</h2>
+              <h2 className="text-2xl font-bold text-center mb-4 text-yellow-300">{t('environmentalForcesManifest', language)}</h2>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {Object.entries(factorReturns).map(([factor, returns]) => {
                   const ret = parseFloat(returns);
@@ -1931,14 +2011,14 @@ export default function ShogunLegendsV3() {
                   
                   // Get environmental element description
                   const elementDesc = {
-                    Quality: "Earth's Stability",
-                    Momentum: "Wind's Swiftness",
-                    Value: "Stone's Endurance",
-                    Growth: "Flame's Ambition",
-                    LowVol: "Water's Calm",
-                    Size: "Thunder's Boldness",
-                    Yield: "Light's Nurturing",
-                    Liquidity: "Mist's Flow"
+                    Quality: t('earthStability', language),
+                    Momentum: t('windSwiftness', language),
+                    Value: t('stoneEndurance', language),
+                    Growth: t('flameAmbition', language),
+                    LowVol: t('waterCalm', language),
+                    Size: t('thunderBoldness', language),
+                    Yield: t('lightNurturing', language),
+                    Liquidity: t('mistFlow', language)
                   }[factor] || factor;
 
                   return (
@@ -1954,7 +2034,7 @@ export default function ShogunLegendsV3() {
                         {isPositive ? '+' : '−'}{absRet.toFixed(1)}%
                       </div>
                       <div className="text-[10px] text-slate-500 mt-1">
-                        {isPositive ? 'Favorable' : 'Challenging'}
+                        {isPositive ? t('favorable', language) : t('challenging', language)}
                       </div>
                     </div>
                   );
@@ -1964,7 +2044,7 @@ export default function ShogunLegendsV3() {
 
             {/* Impact Preview */}
             <div className="bg-slate-800/50 rounded-xl p-6 mb-6 border border-slate-700">
-              <h3 className="text-xl font-bold mb-3 text-yellow-300">Impact on Your Formation</h3>
+              <h3 className="text-xl font-bold mb-3 text-yellow-300">{t('impactOnFormation', language)}</h3>
               <div className="space-y-2 text-sm text-slate-300">
                 {Object.entries(factorReturns).some(([factor]) => {
                   const ret = parseFloat(factorReturns[factor]);
@@ -1983,14 +2063,14 @@ export default function ShogunLegendsV3() {
                         <div key={factor} className="flex items-center justify-between py-1">
                           <span className="text-slate-400">{AXIS_META[factor]?.label || factor}</span>
                           <span className={`font-bold ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
-                            {isPositive ? '+' : ''}{impact.toFixed(1)}% stat impact
+                            {isPositive ? '+' : ''}{impact.toFixed(1)}% {t('statImpact', language)}
                           </span>
                         </div>
                       );
                     })}
                   </div>
                 ) : (
-                  <p className="text-slate-400 italic">The elements remain neutral to your current exposure.</p>
+                  <p className="text-slate-400 italic">{t('elementsNeutral', language)}</p>
                 )}
               </div>
             </div>
@@ -2009,7 +2089,7 @@ export default function ShogunLegendsV3() {
                 }}
                 className="bg-gradient-to-r from-purple-600 to-emerald-600 hover:from-purple-700 hover:to-emerald-700 text-white px-8 sm:px-12 py-3 sm:py-4 rounded-full font-bold text-base sm:text-lg shadow-lg transform hover:scale-105 transition-all w-full sm:w-auto"
               >
-                Enter Battlefield
+                {t('enterBattlefield', language)}
               </button>
             </div>
           </div>
@@ -2027,15 +2107,15 @@ export default function ShogunLegendsV3() {
                         <div className="text-center mb-4">
                             <div className="text-5xl mb-2">⚡</div>
                             <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-emerald-400 mb-1">
-                                OMYO FORCES IMPACTING BATTLEFIELD
+                                {t('omyoForcesImpacting', language)}
                             </h1>
-                            <p className="text-slate-400 italic text-sm">陰陽の気が戦場に影響する</p>
+                            <p className="text-slate-400 italic text-sm">{t('omyoForcesSubtitle', language)}</p>
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             {/* Factor Returns Radar Chart */}
                             <div className="bg-slate-900 rounded-xl p-4 border border-purple-500/30">
-                                <h2 className="text-lg font-bold mb-3 text-purple-400">Factor Returns & Exposures</h2>
+                                <h2 className="text-lg font-bold mb-3 text-purple-400">{t('factorReturnsExposures', language)}</h2>
                                 <ResponsiveContainer width="100%" height={300}>
                                     <RadarChart data={(() => {
                                         const playerUnits = units.filter(u => u.isPlayer);
@@ -2120,7 +2200,7 @@ export default function ShogunLegendsV3() {
                                             tick={{ fill: '#6B7280', fontSize: 9 }}
                                         />
                                         <Radar
-                                            name="Your Team Exposure"
+                                            name={t('yourTeamExposure', language)}
                                             dataKey="playerExposure"
                                             stroke="#3B82F6"
                                             fill="#3B82F6"
@@ -2129,7 +2209,7 @@ export default function ShogunLegendsV3() {
                                             strokeDasharray="5 3"
                                         />
                                         <Radar
-                                            name="Enemy Team Exposure"
+                                            name={t('enemyTeamExposure', language)}
                                             dataKey="enemyExposure"
                                             stroke="#EF4444"
                                             fill="#EF4444"
@@ -2138,7 +2218,7 @@ export default function ShogunLegendsV3() {
                                             strokeDasharray="3 5"
                                         />
                                         <Radar
-                                            name="Factor Return"
+                                            name={t('factorReturn', language)}
                                             dataKey="returnValue"
                                             stroke="none"
                                             fill="none"
@@ -2194,8 +2274,8 @@ export default function ShogunLegendsV3() {
                             {/* Stat Impact Horizontal Bar Chart */}
                             <div className="bg-slate-900 rounded-xl p-4 border border-slate-700">
                                 <h2 className="text-lg font-bold mb-3 text-yellow-300">
-                                    Stat Impact Summary
-                                    {isChallengeMode && <span className="text-xs text-purple-400 ml-2">(Enemy: Omyo Hedge Active)</span>}
+                                    {t('statImpactSummary', language)}
+                                    {isChallengeMode && <span className="text-xs text-purple-400 ml-2">({t('omyoHedgeActive', language)})</span>}
                                 </h2>
                                 <ResponsiveContainer width="100%" height={300}>
                                     <BarChart 
@@ -2325,7 +2405,7 @@ export default function ShogunLegendsV3() {
                                 }}
                                 className="bg-gradient-to-r from-purple-600 to-emerald-600 hover:from-purple-700 hover:to-emerald-700 text-white px-8 sm:px-12 py-3 rounded-full font-bold text-base sm:text-lg shadow-lg transform hover:scale-105 transition-all w-full sm:w-auto"
                             >
-                                Begin Battle
+                                {t('beginBattle', language)}
                             </button>
                         </div>
 
@@ -2481,7 +2561,7 @@ export default function ShogunLegendsV3() {
                                                 const statMap = { 'ATK': 'atk', 'DEF': 'def', 'SPD': 'spd', 'HP': 'hp', 'MP': 'mp' };
                                                 return (
                                                     <div key={unit.id} className="bg-slate-800/50 rounded-lg p-3">
-                                                        <div className="font-bold text-white mb-2 text-sm">{unit.name}</div>
+                                                        <div className="font-bold text-white mb-2 text-sm">{unit.mbti ? getHeroName(unit.mbti, language) : unit.name}</div>
                                                         <div className="overflow-x-auto">
                                                             <table className="w-full text-xs border-collapse">
                                                                 <thead>
@@ -2559,9 +2639,9 @@ export default function ShogunLegendsV3() {
                 <div className="absolute inset-0 z-50 bg-black/80 flex items-center justify-center cursor-pointer" onClick={() => setShowStartOverlay(false)}>
                     <div className="text-center animate-bounce">
                         <h1 className="text-6xl font-black text-red-600 mb-2">
-                            {isHellMode ? "HELL MODE" : (isChallengeMode ? "CHALLENGE MODE" : "BATTLE START")}
+                            {isHellMode ? t('hellMode', language) : (isChallengeMode ? t('challengeMode', language) : t('battleStart', language))}
                         </h1>
-                        <p className="text-white text-xl blink">Tap to Begin</p>
+                        <p className="text-white text-xl blink">{t('tapToBegin', language)}</p>
                     </div>
                 </div>
             )}
@@ -2629,8 +2709,12 @@ export default function ShogunLegendsV3() {
             </div>
 
             <div className="bg-black flex flex-col border-y border-slate-800 shrink-0">
-                <div className="h-8 px-4 flex items-center text-xs text-green-400 font-mono overflow-hidden bg-black/50 border-b border-white/10">
-                     {battleLog.length > 0 && <div className="truncate">{`> ${battleLog[battleLog.length - 1]}`}</div>}
+                <div className="h-20 px-4 py-1 flex flex-col justify-end gap-0.5 text-xs text-green-400 font-mono overflow-hidden bg-black/50 border-b border-white/10">
+                     {battleLog.slice(-4).map((log, idx) => (
+                       <div key={idx} className="truncate opacity-75" style={{ opacity: idx === 3 ? 1 : 0.5 + (idx * 0.15) }}>
+                         {`> ${log}`}
+                       </div>
+                     ))}
                 </div>
                 <div className="h-10 px-4 flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide">
                      <span className="text-[10px] text-gray-500 font-bold uppercase sticky left-0 bg-black z-10 pr-2">NEXT:</span>
@@ -2659,7 +2743,7 @@ export default function ShogunLegendsV3() {
                 ) : activeUnit?.isPlayer ? (
                     <div className="h-full flex gap-2 max-w-lg mx-auto relative">
                         <div className="w-28 bg-slate-800 rounded p-2 flex flex-col justify-center items-center border border-slate-700">
-                            <span className="font-bold text-sm text-center truncate w-full">{activeUnit.name}</span>
+                            <span className="font-bold text-sm text-center truncate w-full">{activeUnit.mbti ? getHeroName(activeUnit.mbti, language) : activeUnit.name}</span>
                             <span className="text-xs text-blue-400 mt-1">{activeUnit.currentMp} MP</span>
 
                             {/* LIVE STATS DISPLAY */}
@@ -2731,8 +2815,8 @@ export default function ShogunLegendsV3() {
                             </div>
                         </div>
                         <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-2">
-                            <button onClick={() => handleAction('attack')} className={`rounded bg-red-700 font-bold text-sm flex items-center justify-center gap-2 ${selectedAction==='attack'?'ring-2 ring-white':''}`}><Sword size={16}/> Attack</button>
-                            <button onClick={() => handleAction('defend')} className="rounded bg-blue-800 font-bold text-sm flex items-center justify-center gap-2"><Shield size={16}/> Guard</button>
+                            <button onClick={() => handleAction('attack')} className={`rounded bg-red-700 font-bold text-sm flex items-center justify-center gap-2 ${selectedAction==='attack'?'ring-2 ring-white':''}`}><Sword size={16}/> {t('attack', language)}</button>
+                            <button onClick={() => handleAction('defend')} className="rounded bg-blue-800 font-bold text-sm flex items-center justify-center gap-2"><Shield size={16}/> {t('guard', language)}</button>
                             <button
                                 onClick={() => {
                                     if(activeUnit.currentMp >= activeUnit.skillCost) handleAction('skill');
@@ -2740,8 +2824,8 @@ export default function ShogunLegendsV3() {
                                 disabled={activeUnit.currentMp < activeUnit.skillCost}
                                 className={`col-span-2 rounded bg-purple-700 font-bold text-sm flex flex-col items-center justify-center disabled:opacity-50 ${selectedAction==='skill'?'ring-2 ring-white':''}`}
                             >
-                                <div className="flex items-center gap-2"><Star size={16}/> {activeUnit.skillName}</div>
-                                {selectedAction === 'skill' && <span className="text-[10px] opacity-90 font-normal">{activeUnit.desc}</span>}
+                                <div className="flex items-center gap-2"><Star size={16}/> {activeUnit.mbti ? getSkillName(activeUnit.mbti, language) : activeUnit.skillName}</div>
+                                {selectedAction === 'skill' && <span className="text-[10px] opacity-90 font-normal">{activeUnit.mbti ? getSkillDesc(activeUnit.mbti, language) : activeUnit.desc}</span>}
                             </button>
                         </div>
                     </div>
@@ -2787,25 +2871,25 @@ export default function ShogunLegendsV3() {
 
             <div className="flex flex-wrap gap-3 justify-center w-full max-w-md px-4">
                 <button onClick={() => setPhase('intro')} className="bg-slate-700 text-white px-6 py-3 rounded-full font-bold hover:scale-105 transition-transform flex items-center gap-2 text-sm sm:text-base sm:px-8">
-                    <RefreshCw size={18}/> Play Again
+                    <RefreshCw size={18}/> {t('backToTitle', language)}
                 </button>
 
                 <button onClick={handleRematch} className="bg-blue-600 text-white px-6 py-3 rounded-full font-bold hover:scale-105 transition-transform flex items-center gap-2 text-sm sm:text-base sm:px-8">
-                    <Repeat size={18}/> Rematch
+                    <Repeat size={18}/> {t('rematch', language)}
                 </button>
 
                 <button onClick={initBattle} className="bg-green-600 text-white px-6 py-3 rounded-full font-bold hover:scale-105 transition-transform flex items-center gap-2 text-sm sm:text-base sm:px-8">
-                    <Sword size={18}/> New Skirmish
+                    <Sword size={18}/> {t('newSkirmish', language)}
                 </button>
 
                 {phase === 'victory' && !isChallengeMode && !isHellMode && (
                     <button onClick={startChallengeMode} className="bg-red-600 text-white px-6 py-3 rounded-full font-bold hover:scale-105 transition-transform shadow-lg shadow-red-900/50 flex items-center gap-2 text-sm sm:text-base sm:px-8">
-                        <Crown size={18} className="text-yellow-400"/> Challenge Mode
+                        <Crown size={18} className="text-yellow-400"/> {t('challengeModeButton', language)}
                     </button>
                 )}
                 {phase === 'victory' && isChallengeMode && !isHellMode && (
                     <button onClick={startHellMode} className="bg-gradient-to-r from-red-900 to-orange-900 text-white px-6 py-3 rounded-full font-bold hover:scale-105 transition-transform shadow-lg shadow-red-900/50 flex items-center gap-2 text-sm sm:text-base sm:px-8">
-                        🔥 Hell Mode
+                        🔥 {t('hellModeButton', language)}
                     </button>
                 )}
             </div>
