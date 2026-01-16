@@ -216,7 +216,7 @@ export const translations = {
     // Common
     language: "Language",
     english: "English",
-    japanese: "Japanese",
+    japanese: "日本語",
     
     // War Council
     tapToRotate: "Tap to Rotate",
@@ -337,7 +337,7 @@ export const translations = {
     // Omyo
     omyoRevelation: "陰陽開示",
     omyoSubtitle: "陰陽の気が現れる",
-    omyoStory1: "あなたの軍が戦場に展開すると、陰陽—陰と陽の自然なバランス—が現れ始めます。要素自体があなたの戦略的エクスポージャに反応し、自然の力があなたの編成をどのように支持または挑戦するかを明らかにします。",
+    omyoStory1: "自軍が戦場に展開すると、陰陽—陰と陽の自然なバランス—が現れ始めます。要素自体が自軍の戦略的エクスポージャに反応し、自然の力が自軍の編成をどのように支持または挑戦するかを明らかにします。",
     omyoStory2: "風が変わり、大地が震え、精神的なエネルギーが整列します。環境要素がその影響を明らかにするにつれて、武将たちの世界の基本的な力へのつながりが明確になります...",
     environmentalForcesManifest: "環境力の現れ",
     earthStability: "大地の安定",
@@ -357,8 +357,8 @@ export const translations = {
     omyoForcesImpacting: "陰陽の力が戦場に影響",
     omyoForcesSubtitle: "陰陽の気が戦場に影響する",
     factorReturnsExposures: "因子影響とエクスポージャ",
-    yourTeamExposure: "あなたの部隊エクスポージャ",
-    enemyTeamExposure: "敵部隊エクスポージャ",
+    yourTeamExposure: "自軍エクスポージャ",
+    enemyTeamExposure: "敵軍エクスポージャ",
     factorReturn: "因子影響",
     statImpactSummary: "能力影響要約",
     omyoHedgeActive: "敵: 陰陽防御有効",
@@ -378,13 +378,13 @@ export const translations = {
     battleLog: "合戦記録",
     
     // Victory/Defeat
-    victory: "凱旋",
-    defeat: "落城",
+    victory: "勝利",
+    defeat: "敗北",
     backToTitle: "スタート画面に戻る",
     rematch: "再戦",
-    newSkirmish: "新規小競り合い",
-    challengeModeButton: "挑戦様式",
-    hellModeButton: "地獄様式",
+    newSkirmish: "別の軍と小競り合い",
+    challengeModeButton: "強敵へ挑む",
+    hellModeButton: "地獄への挑戦",
     
     // Errors
     noSavedProfile: "記録された履歴が見つからないか、記録されたデータが現在の版と互換性がありません。\n\n新たに戦を開始してください。",
@@ -395,7 +395,7 @@ export const translations = {
     
     // Common
     language: "言語",
-    english: "英語",
+    english: "English",
     japanese: "日本語",
     
     // War Council
