@@ -181,6 +181,11 @@ export const useBattleLogic = ({
   }, [unitsRef, turnQueueRef, setPhase, setCurrentActorId, setProcessing, setSelectedAction, setTurnToken, setBattleStats, setTurnQueue, setUnits]);
 
   const executeAttack = useCallback((actor, target) => {
+    if (!actor || !target) {
+      console.error('executeAttack called with invalid actor or target:', { actor, target });
+      return;
+    }
+    
     setUnits(prev => prev.map(u => u.id === actor.id ? { ...u, anim: 'slash' } : u));
     setTimeout(() => setUnits(prev => prev.map(u => u.id === actor.id ? { ...u, anim: null } : u)), 500);
 
@@ -226,16 +231,66 @@ export const useBattleLogic = ({
   }, [setUnits, applyDamage, setBattleLog, language, unitsRef, triggerAnim, setTurnToken, setPhase, nextTurn]);
 
   const runAI = useCallback((actor, executeSkill) => {
+    if (!actor) {
+      console.error('runAI called with undefined actor');
+      return;
+    }
+    
     const currentUnits = unitsRef.current;
-    const targets = currentUnits.filter(u => u.isPlayer !== actor.isPlayer && u.currentHp > 0);
+    // Verify actor still exists in current units
+    const currentActor = currentUnits.find(u => u.id === actor.id);
+    if (!currentActor || currentActor.currentHp <= 0) {
+      console.warn('runAI: Actor not found or dead in current units:', actor.id);
+      setTimeout(nextTurn, 600);
+      return;
+    }
+    
+    // Use current actor from units array to ensure we have latest data
+    const activeActor = currentActor;
+    const targets = currentUnits.filter(u => u.isPlayer !== activeActor.isPlayer && u.currentHp > 0);
     const sentinels = targets.filter(t => t.isSentinel);
+
+    // Check if there are any valid targets
+    if (targets.length === 0) {
+      console.warn('runAI: No valid targets found for actor:', activeActor);
+      // Check if this means victory/defeat condition
+      const enemiesAlive = currentUnits.filter(u => u.isPlayer !== activeActor.isPlayer && u.currentHp > 0).length;
+      const playersAlive = currentUnits.filter(u => u.isPlayer === activeActor.isPlayer && u.currentHp > 0).length;
+      
+      console.log('runAI: Battle state check:', { 
+        enemiesAlive, 
+        playersAlive, 
+        actorIsPlayer: activeActor.isPlayer,
+        totalUnits: currentUnits.length,
+        allUnits: currentUnits.map(u => ({ id: u.id, name: u.name, isPlayer: u.isPlayer, currentHp: u.currentHp }))
+      });
+      
+      // If no enemies alive, player wins; if no players alive, player loses
+      if (enemiesAlive === 0) {
+        console.log('runAI: All enemies defeated - Victory!');
+        setPhase('victory');
+        return;
+      } else if (playersAlive === 0) {
+        console.log('runAI: All players defeated - Defeat!');
+        setPhase('defeat');
+        return;
+      }
+      
+      // This shouldn't happen - if we have no targets but enemies are still alive, there's a logic issue
+      console.error('runAI: No targets found but enemies still alive - this should not happen');
+      // Force a victory/defeat check via nextTurn
+      setTimeout(() => {
+        nextTurn();
+      }, 600);
+      return;
+    }
 
     let move = 'attack';
     let target = null;
 
-    if (actor.role === 'Guardian' && !actor.isSentinel && actor.currentSentinelCharges > 0 && Math.random() > 0.25) {
+    if (activeActor.role === 'Guardian' && !activeActor.isSentinel && activeActor.currentSentinelCharges > 0 && Math.random() > 0.25) {
       move = 'defend';
-    } else if (actor.currentMp >= actor.skillCost && Math.random() > 0.6) {
+    } else if (activeActor.currentMp >= activeActor.skillCost && Math.random() > 0.6) {
       move = 'skill';
       target = targets[Math.floor(Math.random() * targets.length)];
     } else {
@@ -247,33 +302,50 @@ export const useBattleLogic = ({
       }
     }
 
+    // Validate target before proceeding
+    if ((move === 'attack' || move === 'skill') && !target) {
+      console.error('runAI: No target selected for', move, 'action. Actor:', activeActor, 'Targets:', targets);
+      setTimeout(nextTurn, 600);
+      return;
+    }
+
     if (move === 'defend') {
-      const isGuardian = actor.role === 'Guardian';
+      const isGuardian = activeActor.role === 'Guardian';
       let activatesSentinel = false;
-      let newCharges = actor.currentSentinelCharges;
-      if (isGuardian && actor.currentSentinelCharges > 0) {
+      let newCharges = activeActor.currentSentinelCharges;
+      if (isGuardian && activeActor.currentSentinelCharges > 0) {
         activatesSentinel = true;
         newCharges -= 1;
       }
-      setUnits(prev => prev.map(u => u.id === actor.id ? {
+      setUnits(prev => prev.map(u => u.id === activeActor.id ? {
         ...u,
         isGuarding: true,
         isSentinel: activatesSentinel,
         currentSentinelCharges: newCharges,
         currentMp: Math.min(u.maxMp, u.currentMp + 15)
       } : u));
-      const msg = activatesSentinel ? `${actor.name} enters Sentinel Stance!` : `${actor.name} takes a defensive stance.`;
+      const msg = activatesSentinel ? `${activeActor.name} enters Sentinel Stance!` : `${activeActor.name} takes a defensive stance.`;
       setBattleLog(prev => [...prev, msg]);
       setTimeout(nextTurn, 600);
     } else if (move === 'skill') {
+      if (!target) {
+        console.error('runAI: Skill move selected but no target available');
+        setTimeout(nextTurn, 600);
+        return;
+      }
       if (executeSkill) {
-        executeSkill(actor, target);
+        executeSkill(activeActor, target);
       } else {
         // Return action for parent to handle
-        return { action: 'skill', actor, target };
+        return { action: 'skill', actor: activeActor, target };
       }
     } else {
-      executeAttack(actor, target);
+      if (!target) {
+        console.error('runAI: Attack move selected but no target available');
+        setTimeout(nextTurn, 600);
+        return;
+      }
+      executeAttack(activeActor, target);
     }
   }, [unitsRef, setUnits, setBattleLog, nextTurn, executeAttack]);
 

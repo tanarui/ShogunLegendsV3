@@ -58,6 +58,11 @@ export const createUnit = (mbtiKey, isPlayer, idOverride, waStats = {}, isLeader
 };
 
 export const getEffectiveStats = (unit) => {
+  if (!unit || unit.currentHp === undefined || unit.maxHp === undefined) {
+    console.error('getEffectiveStats called with invalid unit:', unit);
+    // Return default stats to prevent crash
+    return { atk: 0, def: 0, spd: 0, hp: 0, mp: 0 };
+  }
   const hpRatio = unit.currentHp / unit.maxHp;
   let multiplier = 0.5 + (0.5 * hpRatio);
 

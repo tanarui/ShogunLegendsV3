@@ -312,10 +312,135 @@ export default function ShogunLegendsV3() {
 
   const proceedToBattle = () => {
     // If units already exist (from Omyo reveal), use them; otherwise create new ones
-    if (units.length > 0 && phase === 'omyo_reveal') {
+    // Check both state and ref to handle async state updates
+    const currentUnitsFromState = units;
+    const currentUnitsFromRef = unitsRef.current;
+    // Prefer ref if it has more units (more up-to-date), otherwise use state
+    const unitsToUse = currentUnitsFromRef.length >= currentUnitsFromState.length ? currentUnitsFromRef : currentUnitsFromState;
+    
+    console.log('proceedToBattle called:', {
+      phase,
+      stateUnitsCount: currentUnitsFromState.length,
+      refUnitsCount: currentUnitsFromRef.length,
+      unitsToUseCount: unitsToUse.length,
+      isPvPMode,
+      playerUnitsInState: currentUnitsFromState.filter(u => u.isPlayer).length,
+      enemyUnitsInState: currentUnitsFromState.filter(u => !u.isPlayer).length,
+      playerUnitsInRef: currentUnitsFromRef.filter(u => u.isPlayer).length,
+      enemyUnitsInRef: currentUnitsFromRef.filter(u => !u.isPlayer).length,
+      usingRef: currentUnitsFromRef.length >= currentUnitsFromState.length
+    });
+    
+    // For PvP rematch, always check ref first since handlePvPRematch updates it immediately
+    // Check if we have valid PvP units in ref (both player and enemy teams)
+    const refPlayerUnits = currentUnitsFromRef.filter(u => u.isPlayer);
+    const refEnemyUnits = currentUnitsFromRef.filter(u => !u.isPlayer);
+    const statePlayerUnits = currentUnitsFromState.filter(u => u.isPlayer);
+    const stateEnemyUnits = currentUnitsFromState.filter(u => !u.isPlayer);
+    
+    // For PvP mode, prefer ref (most up-to-date), but fall back to state if ref is empty
+    const pvpUnits = isPvPMode ? (
+      (currentUnitsFromRef.length > 0 && refPlayerUnits.length > 0 && refEnemyUnits.length > 0) 
+        ? currentUnitsFromRef 
+        : (currentUnitsFromState.length > 0 && statePlayerUnits.length > 0 && stateEnemyUnits.length > 0)
+          ? currentUnitsFromState
+          : null
+    ) : null;
+    
+    if (isPvPMode && pvpUnits && pvpUnits.length >= 10) {
+      console.log('proceedToBattle: Using PvP rematch units', {
+        source: pvpUnits === currentUnitsFromRef ? 'ref' : 'state',
+        total: pvpUnits.length,
+        player: pvpUnits.filter(u => u.isPlayer).length,
+        enemy: pvpUnits.filter(u => !u.isPlayer).length,
+        phase,
+        refCount: currentUnitsFromRef.length,
+        stateCount: currentUnitsFromState.length
+      });
+      const allUnits = pvpUnits;
+      const initialQueue = [...allUnits].sort((a, b) => b.spd - a.spd).map(u => u.id);
+      setUnits(allUnits); // Sync state with ref
+      unitsRef.current = allUnits; // Ensure ref stays in sync
+      setTurnQueue(initialQueue);
+      setCurrentActorId(initialQueue[0]);
+      setBattleStats({ turns: 0, startTime: Date.now() });
+      setBattleLog([]);
+      setShowOmyoImpact(true);
+      setShowStartOverlay(false);
+      setIsChallengeMode(false);
+      setIsHellMode(false);
+      setIsPlayerDemoralized(false);
+      setIsAutoBattle(isPvPMode);
+      setProcessing(false);
+      setSelectedAction(null);
+      setPhase('battle');
+      return;
+    }
+    
+    // Check if we have units from state or ref (for non-PvP or when PvP ref check failed)
+    // For PvP, also check if we have 10 units (5 player + 5 enemy) even if phase isn't exactly 'omyo_reveal'
+    const hasValidUnits = unitsToUse.length > 0 && (
+      phase === 'omyo_reveal' || 
+      (isPvPMode && unitsToUse.length >= 10 && unitsToUse.filter(u => u.isPlayer).length >= 5 && unitsToUse.filter(u => !u.isPlayer).length >= 5)
+    );
+    
+    if (hasValidUnits) {
       // Units already created in handleDeploy, just proceed to battle
-      console.log('Proceeding to battle with units:', units.length, 'Player units:', units.filter(u => u.isPlayer).length, 'Enemy units:', units.filter(u => !u.isPlayer).length);
-      const allUnits = units;
+      const playerUnits = unitsToUse.filter(u => u.isPlayer);
+      const enemyUnits = unitsToUse.filter(u => !u.isPlayer);
+      console.log('Proceeding to battle with units:', unitsToUse.length, 'Player units:', playerUnits.length, 'Enemy units:', enemyUnits.length);
+      console.log('Unit details:', {
+        playerUnits: playerUnits.map(u => ({ id: u.id, name: u.name, currentHp: u.currentHp })),
+        enemyUnits: enemyUnits.map(u => ({ id: u.id, name: u.name, currentHp: u.currentHp })),
+        usingState: currentUnitsFromState.length > 0,
+        usingRef: currentUnitsFromRef.length > 0
+      });
+      
+      // Verify we have both teams
+      if (playerUnits.length === 0) {
+        console.error('proceedToBattle: No player units found!', { 
+          stateUnits: currentUnitsFromState.length, 
+          refUnits: currentUnitsFromRef.length 
+        });
+        alert('No player units found. Please try rematch again.');
+        return;
+      }
+      if (enemyUnits.length === 0) {
+        console.error('proceedToBattle: No enemy units found!', { 
+          stateUnits: currentUnitsFromState.length, 
+          refUnits: currentUnitsFromRef.length,
+          allUnits: unitsToUse.map(u => ({ id: u.id, name: u.name, isPlayer: u.isPlayer }))
+        });
+        alert('No enemy units found. Please try rematch again.');
+        return;
+      }
+      
+      // Ensure we're using the most up-to-date units from ref
+      const allUnits = unitsRef.current.length > 0 ? unitsRef.current : unitsToUse;
+      console.log('proceedToBattle - Final units check:', {
+        usingRef: unitsRef.current.length > 0,
+        totalUnits: allUnits.length,
+        playerUnits: allUnits.filter(u => u.isPlayer).length,
+        enemyUnits: allUnits.filter(u => !u.isPlayer).length
+      });
+      
+      // Double-check we have both teams before proceeding
+      const finalPlayerUnits = allUnits.filter(u => u.isPlayer);
+      const finalEnemyUnits = allUnits.filter(u => !u.isPlayer);
+      if (finalPlayerUnits.length === 0 || finalEnemyUnits.length === 0) {
+        console.error('proceedToBattle: Missing teams after final check!', {
+          playerUnits: finalPlayerUnits.length,
+          enemyUnits: finalEnemyUnits.length,
+          allUnitIds: allUnits.map(u => ({ id: u.id, name: u.name, isPlayer: u.isPlayer }))
+        });
+        alert('Teams are incomplete. Please try rematch again.');
+        return;
+      }
+      
+      // Update state with the final units to ensure consistency
+      setUnits(allUnits);
+      unitsRef.current = allUnits;
+      
       const initialQueue = [...allUnits].sort((a, b) => b.spd - a.spd).map(u => u.id);
       setTurnQueue(initialQueue);
       setCurrentActorId(initialQueue[0]);
@@ -335,13 +460,42 @@ export default function ShogunLegendsV3() {
     }
     
     // Otherwise, create units (for rematch or other cases)
+    console.log('proceedToBattle: Falling through to unit creation (no existing units found)');
+    
+    // CRITICAL: If we're in PvP mode and units weren't found, this is an error
+    // PvP rematch should have already set units via handlePvPRematch
+    if (isPvPMode) {
+      console.error('proceedToBattle: PvP mode but no units found! This should not happen for PvP rematch.', {
+        stateUnits: currentUnitsFromState.length,
+        refUnits: currentUnitsFromRef.length,
+        phase,
+        pvpHashcode,
+        pvpPlayerHashcode
+      });
+      alert('PvP rematch failed to load units. Please try rematch again or go back to PvP Entry.');
+      return;
+    }
+    
     let myBattleUnits = [];
     let enemies = [];
     
     // PvP Mode: Load both teams from hashcodes
-    if (isPvPMode && pvpHashcode && pvpPlayerHashcode) {
+    // Check if both hashcodes are provided (not empty strings)
+    const normalizedEnemyHashcode = (pvpHashcode || '').trim();
+    const normalizedPlayerHashcode = (pvpPlayerHashcode || '').trim();
+    const hasPlayerHashcode = normalizedPlayerHashcode.length === 9;
+    const hasEnemyHashcode = normalizedEnemyHashcode.length === 9;
+    
+    console.log('proceedToBattle PvP check:', { 
+      isPvPMode, 
+      pvpHashcode: normalizedEnemyHashcode, 
+      pvpPlayerHashcode: normalizedPlayerHashcode, 
+      hasPlayerHashcode, 
+      hasEnemyHashcode 
+    });
+    
+    if (isPvPMode && hasEnemyHashcode && hasPlayerHashcode) {
       // Load player team from hashcode
-      const normalizedPlayerHashcode = pvpPlayerHashcode.trim();
       const playerTeamData = loadTeamByHashcode(normalizedPlayerHashcode);
       console.log('Loading PvP player team with hashcode:', normalizedPlayerHashcode, 'Result:', playerTeamData);
       if (!playerTeamData || !playerTeamData.placedUnits || playerTeamData.placedUnits.length < 5) {
@@ -353,11 +507,10 @@ export default function ShogunLegendsV3() {
       }
       
       // Load enemy team from hashcode
-      const normalizedHashcode = pvpHashcode.trim();
-      const enemyTeamData = loadTeamByHashcode(normalizedHashcode);
-      console.log('Loading PvP enemy team with hashcode:', normalizedHashcode, 'Result:', enemyTeamData);
+      const enemyTeamData = loadTeamByHashcode(normalizedEnemyHashcode);
+      console.log('Loading PvP enemy team with hashcode:', normalizedEnemyHashcode, 'Result:', enemyTeamData);
       if (!enemyTeamData || !enemyTeamData.placedUnits || enemyTeamData.placedUnits.length < 5) {
-        alert(`Could not load enemy team with hashcode: ${normalizedHashcode}.\n\nMake sure:\n1. The hashcode is correct\n2. The team has been deployed at least once\n3. You're using the exact hashcode`);
+        alert(`Could not load enemy team with hashcode: ${normalizedEnemyHashcode}.\n\nMake sure:\n1. The hashcode is correct\n2. The team has been deployed at least once\n3. You're using the exact hashcode`);
         setIsPvPMode(false);
         setPvpHashcode('');
         setPvpPlayerHashcode('');
@@ -387,8 +540,15 @@ export default function ShogunLegendsV3() {
       });
       
       setLastEnemyKeys(enemyTeamData.placedUnits.map(u => u.mbti));
-    } else if (isPvPMode && pvpHashcode) {
+    } else if (isPvPMode && hasEnemyHashcode) {
       // Legacy PvP mode: Load only enemy team from hashcode, use profile for player team
+      console.log('PvP Legacy Mode - Using profile for player, hashcode for enemy');
+      
+      if (!placedUnits || placedUnits.length < 5) {
+        alert('Profile does not have a deployed team. Please load your profile or provide a player team hashcode.');
+        return;
+      }
+      
       const sortedMyTeam = [...placedUnits].sort((a, b) => a.coreX - b.coreX);
       myBattleUnits = sortedMyTeam.map(u => {
         const wa = getWaBonus(userMBTI, u.mbti);
@@ -399,9 +559,9 @@ export default function ShogunLegendsV3() {
         return unit;
       });
       
-      const normalizedHashcode = pvpHashcode.trim();
-      const enemyTeamData = loadTeamByHashcode(normalizedHashcode);
-      console.log('Loading PvP team with hashcode:', normalizedHashcode, 'Result:', enemyTeamData);
+      console.log('PvP Legacy Mode - Loading enemy team with hashcode:', normalizedEnemyHashcode);
+      const enemyTeamData = loadTeamByHashcode(normalizedEnemyHashcode);
+      console.log('PvP Legacy Mode - Enemy team data:', enemyTeamData);
       if (enemyTeamData && enemyTeamData.placedUnits && enemyTeamData.placedUnits.length >= 5) {
         const sortedEnemyTeam = [...enemyTeamData.placedUnits].sort((a, b) => a.coreX - b.coreX);
         enemies = sortedEnemyTeam.map((u, i) => {
@@ -412,15 +572,25 @@ export default function ShogunLegendsV3() {
           if (unit.role === 'Guardian') unit.isGuarding = true;
           return unit;
         });
+        console.log('PvP Legacy Mode - Created enemy units:', enemies.length, 'from hashcode:', normalizedEnemyHashcode);
         setLastEnemyKeys(enemyTeamData.placedUnits.map(u => u.mbti));
       } else {
-        alert(`Could not load team with hashcode: ${normalizedHashcode}.\n\nMake sure:\n1. The hashcode is correct (${normalizedHashcode})\n2. The team has been deployed at least once by the owner\n3. You're using the exact hashcode shown in the profile`);
+        console.error('PvP Legacy Mode - Failed to load enemy team:', { normalizedEnemyHashcode, enemyTeamData });
+        alert(`Could not load team with hashcode: ${normalizedEnemyHashcode}.\n\nMake sure:\n1. The hashcode is correct (${normalizedEnemyHashcode})\n2. The team has been deployed at least once by the owner\n3. You're using the exact hashcode shown in the profile`);
         setIsPvPMode(false);
         setPvpHashcode('');
         return;
       }
+    } else if (isPvPMode && !hasEnemyHashcode) {
+      // PvP mode but no valid enemy hashcode - this shouldn't happen
+      console.error('PvP mode is set but enemy hashcode is invalid:', normalizedEnemyHashcode);
+      alert('PvP mode is active but enemy hashcode is missing or invalid. Please go back to PvP Entry.');
+      setIsPvPMode(false);
+      setPvpHashcode('');
+      return;
     } else {
       // Normal Mode: Use placed units for player team
+      console.log('Normal mode - not PvP');
       const sortedMyTeam = [...placedUnits].sort((a, b) => a.coreX - b.coreX);
       myBattleUnits = sortedMyTeam.map(u => {
         const wa = getWaBonus(userMBTI, u.mbti);
@@ -483,12 +653,18 @@ export default function ShogunLegendsV3() {
 
   const handlePvPRematch = () => {
     // For PvP rematch, recreate units from hashcodes with new factor returns
+    // CRITICAL: Capture current state values to avoid stale closures
+    const currentPvpHashcode = pvpHashcode;
+    const currentPvpPlayerHashcode = pvpPlayerHashcode;
+    
     console.log('PvP Rematch - Current state:', { 
-      pvpHashcode, 
-      pvpPlayerHashcode, 
+      pvpHashcode: currentPvpHashcode, 
+      pvpPlayerHashcode: currentPvpPlayerHashcode, 
       isPvPMode,
-      pvpHashcodeType: typeof pvpHashcode,
-      pvpPlayerHashcodeType: typeof pvpPlayerHashcode
+      pvpHashcodeType: typeof currentPvpHashcode,
+      pvpPlayerHashcodeType: typeof currentPvpPlayerHashcode,
+      pvpHashcodeLength: (currentPvpHashcode || '').length,
+      pvpPlayerHashcodeLength: (currentPvpPlayerHashcode || '').length
     });
     
     // Ensure PvP mode is still set
@@ -504,8 +680,8 @@ export default function ShogunLegendsV3() {
     let playerTeamData = null;
     let enemyTeamData = null;
     
-    // Load teams from hashcodes
-    const normalizedPlayerHashcode = (pvpPlayerHashcode || '').trim();
+    // Load teams from hashcodes - use captured state values
+    const normalizedPlayerHashcode = (currentPvpPlayerHashcode || '').trim();
     if (normalizedPlayerHashcode && normalizedPlayerHashcode.length === 9) {
       // Load player team from hashcode
       playerTeamData = loadTeamByHashcode(normalizedPlayerHashcode);
@@ -526,16 +702,23 @@ export default function ShogunLegendsV3() {
     }
     
     // Load enemy team from hashcode - this is critical
-    const normalizedEnemyHashcode = (pvpHashcode || '').trim();
+    // Use the captured state value to ensure we have the latest hashcode
+    const normalizedEnemyHashcode = (currentPvpHashcode || '').trim();
     console.log('PvP Rematch - Enemy hashcode check:', { 
-      pvpHashcode, 
+      pvpHashcodeState: currentPvpHashcode, 
       normalizedEnemyHashcode, 
-      length: normalizedEnemyHashcode.length 
+      length: normalizedEnemyHashcode.length,
+      isEmpty: !normalizedEnemyHashcode,
+      isValidLength: normalizedEnemyHashcode.length === 9
     });
     
     if (!normalizedEnemyHashcode || normalizedEnemyHashcode.length !== 9) {
       alert(`Enemy hashcode is missing or invalid: "${normalizedEnemyHashcode}". Please go back to PvP Entry.`);
-      console.error('PvP Rematch - Enemy hashcode is invalid:', normalizedEnemyHashcode);
+      console.error('PvP Rematch - Enemy hashcode is invalid:', {
+        original: currentPvpHashcode,
+        normalized: normalizedEnemyHashcode,
+        length: normalizedEnemyHashcode.length
+      });
       return;
     }
     
@@ -544,9 +727,20 @@ export default function ShogunLegendsV3() {
     
     if (!enemyTeamData || !enemyTeamData.placedUnits || enemyTeamData.placedUnits.length < 5) {
       alert(`Could not load enemy team with hashcode: ${normalizedEnemyHashcode} for rematch.`);
-      console.error('PvP Rematch - Failed to load enemy team:', enemyTeamData);
+      console.error('PvP Rematch - Failed to load enemy team:', {
+        hashcode: normalizedEnemyHashcode,
+        result: enemyTeamData,
+        hasPlacedUnits: enemyTeamData?.placedUnits?.length
+      });
       return;
     }
+    
+    console.log('PvP Rematch - Successfully loaded enemy team:', {
+      hashcode: normalizedEnemyHashcode,
+      mbti: enemyTeamData.mbti,
+      unitCount: enemyTeamData.placedUnits.length,
+      unitNames: enemyTeamData.placedUnits.map(u => u.mbti)
+    });
     
     // Create player units from hashcode/profile
     const sortedPlayerTeam = [...playerTeamData.placedUnits].sort((a, b) => a.coreX - b.coreX);
@@ -573,12 +767,57 @@ export default function ShogunLegendsV3() {
     console.log('PvP Rematch - Created units:', { 
       playerUnits: myBattleUnits.length, 
       enemyUnits: enemies.length,
-      allUnits: myBattleUnits.length + enemies.length
+      allUnits: myBattleUnits.length + enemies.length,
+      playerUnitNames: myBattleUnits.map(u => u.name),
+      enemyUnitNames: enemies.map(u => u.name)
     });
     
-    setUnits([...myBattleUnits, ...enemies]);
+    // Verify both teams were created
+    if (myBattleUnits.length === 0) {
+      console.error('PvP Rematch - No player units created!');
+      alert('Failed to create player units for rematch. Please try again.');
+      return;
+    }
+    if (enemies.length === 0) {
+      console.error('PvP Rematch - No enemy units created!');
+      alert('Failed to create enemy units for rematch. Please try again.');
+      return;
+    }
+    
+    const allUnits = [...myBattleUnits, ...enemies];
+    console.log('PvP Rematch - Setting units:', allUnits.length, 'units total');
+    console.log('PvP Rematch - Unit breakdown:', {
+      player: myBattleUnits.map(u => u.name),
+      enemy: enemies.map(u => u.name)
+    });
+    
+    // CRITICAL: Set ref FIRST synchronously, then state
+    // This ensures proceedToBattle can find units immediately when called
+    unitsRef.current = allUnits;
+    setUnits(allUnits);
+    
+    // Set phase immediately (no delays) to ensure proceedToBattle can find the right phase
     setPhase('omyo_reveal');
     setShowOmyoReveal(true);
+    
+    // Verify units were set correctly (async check for logging only)
+    setTimeout(() => {
+      const currentUnits = unitsRef.current;
+      const currentPlayerUnits = currentUnits.filter(u => u.isPlayer);
+      const currentEnemyUnits = currentUnits.filter(u => !u.isPlayer);
+      console.log('PvP Rematch - Units verification after set:', {
+        total: currentUnits.length,
+        player: currentPlayerUnits.length,
+        enemy: currentEnemyUnits.length,
+        refUnits: unitsRef.current.length
+      });
+      
+      if (currentEnemyUnits.length === 0) {
+        console.error('PvP Rematch - Enemy units missing after state update!');
+        alert('Enemy units failed to load. Please try rematch again.');
+        return;
+      }
+    }, 100);
   };
 
   const proceedToRematch = () => {
