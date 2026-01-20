@@ -233,10 +233,13 @@ export const decodeTeamHashcode = (hashcode) => {
     
     // CHARACTERS and HERO_ID_TO_MBTI are already imported at the top
     
-    // Extract player MBTI (first 4 chars)
-    const mbti = hashcode.substring(0, 4);
+    // Normalize: MBTI part should be uppercase, hero IDs can be any case
+    const normalizedHashcode = hashcode.toUpperCase().substring(0, 4) + hashcode.substring(4, 9);
     
-    // Extract hero ID chars (last 5 chars)
+    // Extract player MBTI (first 4 chars) - uppercase
+    const mbti = normalizedHashcode.substring(0, 4);
+    
+    // Extract hero ID chars (last 5 chars) - preserve original case for lookup
     const heroCodes = hashcode.substring(4, 9);
     const placedUnits = [];
     
@@ -244,8 +247,17 @@ export const decodeTeamHashcode = (hashcode) => {
     for (let i = 0; i < 5; i++) {
       const heroIdChar = heroCodes[i];
       
-      // Convert hero ID char to MBTI
-      const mbtiForHero = HERO_ID_TO_MBTI[heroIdChar];
+      // Convert hero ID char to MBTI (try original case first, then try both cases)
+      // Hero IDs are: '0'-'9', 'a'-'f' (lowercase), 'Z', 'Y' (uppercase)
+      let mbtiForHero = HERO_ID_TO_MBTI[heroIdChar];
+      if (!mbtiForHero) {
+        // Try uppercase (for 'Z' and 'Y')
+        mbtiForHero = HERO_ID_TO_MBTI[heroIdChar.toUpperCase()];
+      }
+      if (!mbtiForHero) {
+        // Try lowercase (for 'a'-'f')
+        mbtiForHero = HERO_ID_TO_MBTI[heroIdChar.toLowerCase()];
+      }
       if (!mbtiForHero) {
         throw new Error(`No MBTI found for hero ID: ${heroIdChar}`);
       }
