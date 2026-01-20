@@ -483,6 +483,20 @@ export default function ShogunLegendsV3() {
 
   const handlePvPRematch = () => {
     // For PvP rematch, recreate units from hashcodes with new factor returns
+    console.log('PvP Rematch - Current state:', { 
+      pvpHashcode, 
+      pvpPlayerHashcode, 
+      isPvPMode,
+      pvpHashcodeType: typeof pvpHashcode,
+      pvpPlayerHashcodeType: typeof pvpPlayerHashcode
+    });
+    
+    // Ensure PvP mode is still set
+    if (!isPvPMode) {
+      console.warn('PvP Rematch called but isPvPMode is false');
+      setIsPvPMode(true);
+    }
+    
     const returns = generateFactorReturns();
     setFactorReturns(returns);
     
@@ -491,10 +505,11 @@ export default function ShogunLegendsV3() {
     let enemyTeamData = null;
     
     // Load teams from hashcodes
-    if (pvpPlayerHashcode && pvpPlayerHashcode.trim()) {
+    const normalizedPlayerHashcode = (pvpPlayerHashcode || '').trim();
+    if (normalizedPlayerHashcode && normalizedPlayerHashcode.length === 9) {
       // Load player team from hashcode
-      const normalizedPlayerHashcode = pvpPlayerHashcode.trim();
       playerTeamData = loadTeamByHashcode(normalizedPlayerHashcode);
+      console.log('PvP Rematch - Loading player team from hashcode:', normalizedPlayerHashcode, 'Result:', playerTeamData);
       if (!playerTeamData || !playerTeamData.placedUnits || playerTeamData.placedUnits.length < 5) {
         alert(`Could not load player team with hashcode: ${normalizedPlayerHashcode} for rematch.`);
         return;
@@ -502,6 +517,7 @@ export default function ShogunLegendsV3() {
     } else {
       // Use profile for player team
       const profileData = loadProfile();
+      console.log('PvP Rematch - Loading player team from profile:', profileData);
       if (!profileData || !profileData.placedUnits || profileData.placedUnits.length < 5) {
         alert('Could not load profile for rematch. Please go back to PvP Entry.');
         return;
@@ -509,11 +525,26 @@ export default function ShogunLegendsV3() {
       playerTeamData = profileData;
     }
     
-    // Load enemy team from hashcode
-    const normalizedEnemyHashcode = pvpHashcode.trim();
+    // Load enemy team from hashcode - this is critical
+    const normalizedEnemyHashcode = (pvpHashcode || '').trim();
+    console.log('PvP Rematch - Enemy hashcode check:', { 
+      pvpHashcode, 
+      normalizedEnemyHashcode, 
+      length: normalizedEnemyHashcode.length 
+    });
+    
+    if (!normalizedEnemyHashcode || normalizedEnemyHashcode.length !== 9) {
+      alert(`Enemy hashcode is missing or invalid: "${normalizedEnemyHashcode}". Please go back to PvP Entry.`);
+      console.error('PvP Rematch - Enemy hashcode is invalid:', normalizedEnemyHashcode);
+      return;
+    }
+    
     enemyTeamData = loadTeamByHashcode(normalizedEnemyHashcode);
+    console.log('PvP Rematch - Loading enemy team from hashcode:', normalizedEnemyHashcode, 'Result:', enemyTeamData);
+    
     if (!enemyTeamData || !enemyTeamData.placedUnits || enemyTeamData.placedUnits.length < 5) {
       alert(`Could not load enemy team with hashcode: ${normalizedEnemyHashcode} for rematch.`);
+      console.error('PvP Rematch - Failed to load enemy team:', enemyTeamData);
       return;
     }
     
@@ -539,7 +570,12 @@ export default function ShogunLegendsV3() {
       return unit;
     });
     
-    console.log('PvP Rematch - Player units:', myBattleUnits.length, 'Enemy units:', enemies.length);
+    console.log('PvP Rematch - Created units:', { 
+      playerUnits: myBattleUnits.length, 
+      enemyUnits: enemies.length,
+      allUnits: myBattleUnits.length + enemies.length
+    });
+    
     setUnits([...myBattleUnits, ...enemies]);
     setPhase('omyo_reveal');
     setShowOmyoReveal(true);
